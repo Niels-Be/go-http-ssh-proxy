@@ -1,10 +1,10 @@
 HTTP-SSH-Proxy
 ==============
 
-A Simple Proxy that routes requests through ssh tunnels based on Host header.
+A simple Proxy that routes requests through ssh tunnels based on Host header.
 It allows you to setup a single proxy server to access multiple private services on remote networks.
 
-This is useful in scenarios where you only have SSH access to a Server but want to access a private HTTP Endpoint.
+This is useful in scenarios where you only have SSH access to a server but want to access a private HTTP endpoint.
 For example a central Prometheus server that scrapes multiple node-exportes without having to expose the node-exporter port publicly.
 
 
@@ -21,6 +21,7 @@ config.yml
 DefaultSSHKey: ~/.ssh/id_rsa
 DefaultUsername: anon
 IdleTimeout: 120s # close idle connections after 120sec. 0 to disable
+# ProxyFallback: true # act as a regular proxy for anything that is not found in the endpoint list
 Endpoints:
   # Imagine a service running on ingres.public.com that binds to 127.0.0.1:80
   # Expose service on ingres.public.com:80 as http://test.network.local/
@@ -53,7 +54,7 @@ curl http://test.network.local/
 
 
 ### Security
-Please not that this essentially punches a big hohle in you Firewall setup.
+Please note that this essentially punches a big hohle in you Firewall setup.
 Because you can expose anything on the local network of the target server.
 Make sure to only configure safe routes and do not expose this proxy on the internet.
 

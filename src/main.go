@@ -20,6 +20,8 @@ type Configuration struct {
 
 	// Time in idle after a SSH connection is closed. 0 for infinite
 	IdleTimeout time.Duration `yaml:"IdleTimeout"`
+	// directly proxy hosts not found in config
+	ProxyFallback bool `yaml:"ProxyFallback"`
 
 	Endpoints []*RemoteEndpoint `yaml:"Endpoints"`
 
@@ -80,6 +82,8 @@ func main() {
 	server := &http.Server{Addr: config.Bind, Handler: &proxy}
 
 	c := make(chan os.Signal)
+	done := make(chan bool, 1)
+
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
@@ -87,6 +91,7 @@ func main() {
 		log.Printf("Closing")
 		server.Close()
 		proxy.Close()
+		done <- true
 	}()
 
 	err := server.ListenAndServe()
@@ -95,4 +100,5 @@ func main() {
 			log.Fatalf("Server Error: %s", err.Error())
 		}
 	}
+	<-done
 }

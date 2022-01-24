@@ -541,5 +541,11 @@ func (tun *SSHTun) Forward(localConn net.Conn) error {
 // Stop closes the SSH tunnel and its connections.
 // After this call all Set* methods will have effect and Start can be called again.
 func (tun *SSHTun) Stop() {
+	ctx, cancel := context.WithTimeout(tun.ctx, 1*time.Second)
 	tun.errStarted(nil)
+	if !tun.started {
+		cancel()
+	}
+	<-ctx.Done()
+	cancel()
 }

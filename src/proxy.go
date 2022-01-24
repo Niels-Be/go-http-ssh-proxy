@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"http-ssh-proxy/src/sshtun"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 type proxyEntry struct {
@@ -34,13 +36,54 @@ func (p *proxyEntry) handleTunneling(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
 		return
 	}
+	w.WriteHeader(http.StatusOK)
 	client_conn, _, err := hijacker.Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 	}
 	defer client_conn.Close()
-	w.WriteHeader(http.StatusOK)
 	p.tun.Forward(client_conn)
+}
+
+func handleTunneling(w http.ResponseWriter, r *http.Request) {
+	dest_conn, err := net.DialTimeout("tcp", r.Host, 15*time.Second)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
+		return
+	}
+	client_conn, _, err := hijacker.Hijack()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+	}
+	go transfer(dest_conn, client_conn)
+	go transfer(client_conn, dest_conn)
+}
+func transfer(destination io.WriteCloser, source io.ReadCloser) {
+	defer destination.Close()
+	defer source.Close()
+	io.Copy(destination, source)
+}
+
+func handleHTTP(w http.ResponseWriter, req *http.Request) {
+	resp, err := http.DefaultTransport.RoundTrip(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer resp.Body.Close()
+	for k, vv := range w.Header() {
+		for _, v := range vv {
+			resp.Header.Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 type Proxy struct {
@@ -81,10 +124,17 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// fail with BadGateway
-	log.Printf("Host %s Not Found", r.Host)
-	w.WriteHeader(502)
-
+	if p.config.ProxyFallback {
+		if r.Method == http.MethodConnect {
+			handleTunneling(w, r)
+		} else {
+			handleHTTP(w, r)
+		}
+	} else {
+		// fail with BadGateway
+		log.Printf("Host %s Not Found", r.Host)
+		w.WriteHeader(502)
+	}
 }
 
 func (p *Proxy) Close() {
