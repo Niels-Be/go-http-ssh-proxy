@@ -17,6 +17,32 @@ type proxyEntry struct {
 	timeoutChan *chan struct{}
 }
 
+func (p *proxyEntry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if p.timeoutChan != nil {
+		*p.timeoutChan <- struct{}{}
+	}
+	if r.Method == http.MethodConnect {
+		p.handleTunneling(w, r)
+	} else {
+		p.proxy.ServeHTTP(w, r)
+	}
+}
+
+func (p *proxyEntry) handleTunneling(w http.ResponseWriter, r *http.Request) {
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
+		return
+	}
+	client_conn, _, err := hijacker.Hijack()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+	}
+	defer client_conn.Close()
+	w.WriteHeader(http.StatusOK)
+	p.tun.Forward(client_conn)
+}
+
 type Proxy struct {
 	openTunnels map[string]proxyEntry
 	config      *Configuration
@@ -37,10 +63,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// try an open tunnel
 	entry, ok := p.openTunnels[r.Host]
 	if ok {
-		if entry.timeoutChan != nil {
-			*entry.timeoutChan <- struct{}{}
-		}
-		entry.proxy.ServeHTTP(w, r)
+		entry.ServeHTTP(w, r)
 		return
 	}
 
@@ -53,7 +76,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(500)
 				return
 			}
-			tun.proxy.ServeHTTP(w, r)
+			tun.ServeHTTP(w, r)
 			return
 		}
 	}

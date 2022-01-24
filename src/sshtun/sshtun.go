@@ -77,6 +77,7 @@ type SSHTun struct {
 	timeout       time.Duration
 	debug         bool
 	connState     func(*SSHTun, ConnState)
+	sshConn       *ssh.Client
 }
 
 // ConnState represents the state of the SSH tunnel. It's returned to an optional function provided to SetConnState.
@@ -277,6 +278,7 @@ func (tun *SSHTun) Start() error {
 		localList.Close()
 		return tun.errNotStarted(fmt.Errorf("SSH connection to %s failed: %s", server, err.Error()))
 	}
+	tun.sshConn = sshConn
 	if tun.debug {
 		log.Printf("SSH connection to %s done", server)
 	}
@@ -306,7 +308,10 @@ func (tun *SSHTun) Start() error {
 			}
 
 			// Launch the forward
-			go tun.forward(localConn, sshConn)
+			go func() {
+				defer localConn.Close()
+				tun.Forward(localConn)
+			}()
 		}
 	}()
 
@@ -353,6 +358,7 @@ func (tun *SSHTun) errNotStarted(err error) error {
 
 func (tun *SSHTun) errStarted(err error) {
 	tun.Lock()
+	tun.sshConn = nil
 	if tun.started {
 		tun.cancel()
 		if tun.connState != nil {
@@ -477,19 +483,21 @@ func (tun *SSHTun) getSSHAuthMethodForSSHAgent() (ssh.AuthMethod, error) {
 	return ssh.PublicKeys(signers...), nil
 }
 
-func (tun *SSHTun) forward(localConn net.Conn, sshConn *ssh.Client) {
-	defer localConn.Close()
+func (tun *SSHTun) Forward(localConn net.Conn) error {
+	if !tun.started || tun.sshConn == nil {
+		return fmt.Errorf("tunnel not started")
+	}
 
 	local := tun.local.connectionString()
 	server := tun.server.connectionString()
 	remote := tun.remote.connectionString()
 
-	remoteConn, err := sshConn.Dial(tun.remote.connectionType(), remote)
+	remoteConn, err := tun.sshConn.Dial(tun.remote.connectionType(), remote)
 	if err != nil {
 		if tun.debug {
 			log.Printf("Remote dial to %s failed: %s", remote, err.Error())
 		}
-		return
+		return err
 	}
 	defer remoteConn.Close()
 	if tun.debug {
@@ -523,12 +531,11 @@ func (tun *SSHTun) forward(localConn net.Conn, sshConn *ssh.Client) {
 		myCancel()
 	}()
 
-	select {
-	case <-myCtx.Done():
-		if tun.debug {
-			log.Printf("SSH tunnel CLOSE: %s", connStr)
-		}
+	<-myCtx.Done()
+	if tun.debug {
+		log.Printf("SSH tunnel CLOSE: %s", connStr)
 	}
+	return nil
 }
 
 // Stop closes the SSH tunnel and its connections.
