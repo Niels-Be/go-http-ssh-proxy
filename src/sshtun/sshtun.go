@@ -161,6 +161,10 @@ func (tun *SSHTun) GetLocalPort() int {
 	return tun.local.Port
 }
 
+func (tun *SSHTun) GetContext() *context.Context {
+	return &tun.ctx
+}
+
 // SetUser changes the user used to make the SSH connection.
 func (tun *SSHTun) SetUser(user string) {
 	tun.user = user

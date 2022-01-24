@@ -7,8 +7,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 type Configuration struct {
@@ -16,6 +17,9 @@ type Configuration struct {
 
 	DefaultSSHKey   string `yaml:"DefaultSSHKey"`
 	DefaultUsername string `yaml:"DefaultUsername"`
+
+	// Time in idle after a SSH connection is closed. 0 for infinite
+	IdleTimeout time.Duration `yaml:"IdleTimeout"`
 
 	Endpoints []*RemoteEndpoint `yaml:"Endpoints"`
 
@@ -25,10 +29,11 @@ type Configuration struct {
 type RemoteEndpoint struct {
 	VHostname string `yaml:"VHostname"`
 
-	SSHHostname string `yaml:"SSHHostname"`
-	SSHPort     int    `yaml:"SSHPort"`
-	Username    string `yaml:"Username"`
-	SSHKey      string `yaml:"SSHKey"`
+	SSHHostname       string         `yaml:"SSHHostname"`
+	SSHPort           int            `yaml:"SSHPort"`
+	Username          string         `yaml:"Username"`
+	SSHKey            string         `yaml:"SSHKey"`
+	SSHConnectTimeout *time.Duration `yaml:"SSHConnectTimeout"`
 
 	ProxyAddress string `yaml:"ProxyAddress"`
 }

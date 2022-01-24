@@ -20,18 +20,20 @@ config.yml
 # Set global ssh defaults
 DefaultSSHKey: ~/.ssh/id_rsa
 DefaultUsername: anon
+IdleTimeout: 120s # close idle connections after 120sec. 0 to disable
 Endpoints:
   # Imagine a service running on ingres.public.com that binds to 127.0.0.1:80
   # Expose service on ingres.public.com:80 as http://test.network.local/
   - VHostname: test.network.local
     SSHHostname: ingres.public.com
     # SSHPort: 22 # default
+    # SSHConnectTimeout: 15s # default
     # SSHKey: # defaults to .DefaultSSHKey
     # Username: # defaults to .DefaultUsername
     # ProxyAddress: localhost:80 # default
   # jumpbox.public.com is a public server that is connected to a private network
   # Here you expose other.network.local:9200 as if it was directly publicly reachable
-  - VHostname: other.network.local
+  - VHostname: other.network.local:9200
     SSHHostname: jumpbox.public.com
     ProxyAddress: other.network.local:9200
 # Enable more verbose output
@@ -43,7 +45,7 @@ Example Curl usage:
 # Via Host Header
 curl -H "Host: test.network.local" http://localhost:8082/
 # Via Proxy Parameter
-curl --proxy http://localhost:8082/ http://other.network.local/
+curl --proxy http://localhost:8082/ http://other.network.local:9200/
 # Via Environment Variable
 export http_proxy=http://localhost:8082/
 curl http://test.network.local/

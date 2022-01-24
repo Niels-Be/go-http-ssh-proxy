@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"http-ssh-proxy/src/sshtun"
 	"log"
 	"net"
@@ -11,8 +12,9 @@ import (
 )
 
 type proxyEntry struct {
-	tun   *sshtun.SSHTun
-	proxy *httputil.ReverseProxy
+	tun         *sshtun.SSHTun
+	proxy       *httputil.ReverseProxy
+	timeoutChan *chan struct{}
 }
 
 type Proxy struct {
@@ -35,6 +37,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// try an open tunnel
 	entry, ok := p.openTunnels[r.Host]
 	if ok {
+		if entry.timeoutChan != nil {
+			*entry.timeoutChan <- struct{}{}
+		}
 		entry.proxy.ServeHTTP(w, r)
 		return
 	}
@@ -77,6 +82,9 @@ func (p *Proxy) createTunnel(ep *RemoteEndpoint) (*proxyEntry, error) {
 	tun.SetKeyFile(ep.SSHKey)
 	tun.SetPort(ep.SSHPort)
 	tun.SetRemoteHost(addr.IP.String())
+	if ep.SSHConnectTimeout != nil {
+		tun.SetTimeout(*ep.SSHConnectTimeout)
+	}
 
 	if err := tun.Start(); err != nil {
 		return nil, err
@@ -92,14 +100,42 @@ func (p *Proxy) createTunnel(ep *RemoteEndpoint) (*proxyEntry, error) {
 		delete(p.openTunnels, ep.VHostname)
 	}()
 
+	var timeoutChan *chan struct{}
+	if p.config.IdleTimeout.Seconds() > 0 {
+		c := make(chan struct{})
+		timeoutChan = &c
+		go func() {
+			ctx, cancel := context.WithTimeout(*tun.GetContext(), p.config.IdleTimeout)
+			for {
+				select {
+				case <-ctx.Done():
+					close(*timeoutChan)
+					if ctx.Err().Error() == "context deadline exceeded" {
+						if p.config.Debug {
+							log.Printf("Closing connection to %s by Idle timeout", ep.SSHHostname)
+						}
+						tun.Stop()
+					}
+					cancel()
+					return
+				case <-*timeoutChan:
+					// reset timeout
+					cancel()
+					ctx, cancel = context.WithTimeout(*tun.GetContext(), p.config.IdleTimeout)
+				}
+			}
+		}()
+	}
+
 	url := url.URL{
 		Scheme: "http",
 		Host:   "localhost:" + strconv.Itoa(tun.GetLocalPort()),
 	}
 
 	entry := proxyEntry{
-		tun:   tun,
-		proxy: httputil.NewSingleHostReverseProxy(&url),
+		tun:         tun,
+		proxy:       httputil.NewSingleHostReverseProxy(&url),
+		timeoutChan: timeoutChan,
 	}
 	p.openTunnels[ep.VHostname] = entry
 	return &entry, nil
