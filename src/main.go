@@ -12,6 +12,8 @@ import (
 )
 
 type Configuration struct {
+	Bind string `yaml:"Bind"`
+
 	DefaultSSHKey   string `yaml:"DefaultSSHKey"`
 	DefaultUsername string `yaml:"DefaultUsername"`
 
@@ -32,7 +34,9 @@ type RemoteEndpoint struct {
 }
 
 func parseConfig(filename string) Configuration {
-	var b Configuration
+	var b = Configuration{
+		Bind: "localhost:8082",
+	}
 
 	data, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -68,7 +72,7 @@ func main() {
 
 	proxy := NewProxy(&config)
 
-	server := &http.Server{Addr: ":8082", Handler: &proxy}
+	server := &http.Server{Addr: config.Bind, Handler: &proxy}
 
 	c := make(chan os.Signal)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
