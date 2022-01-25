@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -31,13 +33,17 @@ type Configuration struct {
 type RemoteEndpoint struct {
 	VHostname string `yaml:"VHostname"`
 
-	SSHHostname       string         `yaml:"SSHHostname"`
-	SSHPort           int            `yaml:"SSHPort"`
-	Username          string         `yaml:"Username"`
-	SSHKey            string         `yaml:"SSHKey"`
-	SSHConnectTimeout *time.Duration `yaml:"SSHConnectTimeout"`
+	SSHHostname       string        `yaml:"SSHHostname"`
+	SSHPort           int           `yaml:"SSHPort"`
+	Username          string        `yaml:"Username"`
+	SSHKey            string        `yaml:"SSHKey"`
+	SSHConnectTimeout time.Duration `yaml:"SSHConnectTimeout"`
 
 	ProxyAddress string `yaml:"ProxyAddress"`
+}
+
+func (ep *RemoteEndpoint) SSHAddr() string {
+	return ep.SSHHostname + ":" + strconv.Itoa(ep.SSHPort)
 }
 
 func parseConfig(filename string) Configuration {
@@ -68,6 +74,9 @@ func parseConfig(filename string) Configuration {
 		if ep.SSHPort == 0 {
 			ep.SSHPort = 22
 		}
+		if ep.SSHConnectTimeout == 0 {
+			ep.SSHConnectTimeout = 15 * time.Second
+		}
 	}
 	return b
 }
@@ -77,12 +86,13 @@ func main() {
 	config := parseConfig("./config.yml")
 	log.Printf("Config: %v", config)
 
-	proxy := NewProxy(&config)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	proxy := NewProxy(ctx, &config)
 
 	server := &http.Server{Addr: config.Bind, Handler: &proxy}
 
 	c := make(chan os.Signal)
-	done := make(chan bool, 1)
 
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
@@ -90,8 +100,7 @@ func main() {
 		<-c
 		log.Printf("Closing")
 		server.Close()
-		proxy.Close()
-		done <- true
+		cancel()
 	}()
 
 	err := server.ListenAndServe()
@@ -100,5 +109,5 @@ func main() {
 			log.Fatalf("Server Error: %s", err.Error())
 		}
 	}
-	<-done
+	<-ctx.Done()
 }
